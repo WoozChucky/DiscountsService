@@ -12,27 +12,35 @@ public interface IDiscountsConnection : IConnection
 
 public class DiscountsConnection : Connection, IDiscountsConnection
 {
-    public DiscountsConnection(ILogger logger, TcpClient tcpClient, IServerBase server, IPacketReader packetReader, ushort maxQueuedPackets) : base(logger, tcpClient, server, packetReader, maxQueuedPackets)
+    public DiscountsConnection(ILoggerFactory loggerFactory, TcpClient tcpClient, IServerBase server, IPacketReader packetReader, ushort maxQueuedPackets) 
+        : base(loggerFactory.CreateLogger<DiscountsConnection>(), tcpClient, server, packetReader, maxQueuedPackets)
     {
     }
 
     protected override void OnHandshakeFinished()
     {
-        throw new NotImplementedException();
+        Server.CallConnectionListener(this);
     }
 
     protected override Task<Stream> GetStream(TcpClient client)
     {
-        throw new NotImplementedException();
+        //NOTE: In case of TLS we could create the NetworkStream, wrap it in SslStream and then authenticate before returning it
+        
+        return Task.FromResult<Stream>(new NetworkStream(client.Client, true));
     }
 
-    protected override Task OnClose(bool expected = true)
+    protected override async Task OnClose(bool expected = true)
     {
-        throw new NotImplementedException();
+        await Server.RemoveConnection(this);
     }
 
-    protected override Task OnReceive(NetworkPacket packet, Packet? payload)
+    protected override async Task OnReceive(NetworkPacket packet, Packet? payload)
     {
-        throw new NotImplementedException();
+        await Server.CallListener(this, packet, payload);
+    }
+
+    public override int GetHashCode()
+    {
+        return Id.GetHashCode();
     }
 }

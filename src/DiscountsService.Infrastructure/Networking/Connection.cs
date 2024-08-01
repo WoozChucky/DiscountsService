@@ -39,17 +39,14 @@ public abstract class Connection : BackgroundService, IConnection
     protected Connection(ILogger logger, TcpClient tcpClient, IServerBase server, IPacketReader packetReader, ushort maxQueuedPackets)
     {
         Id = Guid.NewGuid();
+        CancellationTokenSource = new CancellationTokenSource();
         Logger = logger;
         Server = server;
         _client = tcpClient;
+        RemoteEndPoint = tcpClient.Client.RemoteEndPoint?.ToString() ?? "Unknown";
         _packetReader = packetReader;
         _packetsToSend = new RingBuffer<NetworkPacket>(maxQueuedPackets);
         _packetsToSend.BufferFull += OnPacketQueueFull;
-    }
-
-    protected void Init(TcpClient client)
-    {
-        _client = client;
     }
     
     protected bool IsConnected => _client?.Connected == true;
@@ -71,6 +68,8 @@ public abstract class Connection : BackgroundService, IConnection
         Logger.LogInformation("New connection from {RemoteEndPoint}", _client.Client.RemoteEndPoint?.ToString());
 
         _stream = await GetStream(_client);
+        
+        _ = Task.Factory.StartNew(SendPacketsWhenAvailable, TaskCreationOptions.LongRunning);
         
         OnHandshakeFinished();
 
@@ -152,7 +151,7 @@ public abstract class Connection : BackgroundService, IConnection
                     {
                         Logger.LogError(e, "Failed to send packet");
                     }
-                    Logger.LogTrace("OUT: {Type} => {Packet}", packet.Header.Type, JsonSerializer.Serialize(packet));
+                    Logger.LogDebug("OUT: {Type} => {Packet}", packet.Header.Type, JsonSerializer.Serialize(packet));
                 }
                 else
                 {

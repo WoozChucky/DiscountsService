@@ -5,23 +5,21 @@ using ProtoBuf;
 namespace DiscountsService.Network.Packets;
 
 [ProtoContract]
-[Packet(Type = NetworkPacketType.GenerateDiscountsRequest)]
-public class GenerateDiscountsRequestPacket : Packet
+[Packet(Type = NetworkPacketType.UseDiscountRequest)]
+public class UseDiscountRequestPacket : Packet
 {
     public static readonly ushort PacketVersion = 1;
-    public static readonly NetworkPacketType PacketType = NetworkPacketType.GenerateDiscountsRequest;
+    public static readonly NetworkPacketType PacketType = NetworkPacketType.UseDiscountRequest;
 
-    [ProtoMember(1)] public required ushort Count { get; init; }
-    [ProtoMember(2)] public required byte Length { get; init; }
+    [ProtoMember(1)] public required string Code { get; init; }
 
-    public static NetworkPacket Create(ushort count, byte length)
+    public static NetworkPacket Create(string code)
     {
         using var ms = new MemoryStream();
 
-        var packet = new GenerateDiscountsRequestPacket
+        var packet = new UseDiscountRequestPacket
         {
-            Count = count,
-            Length = length
+            Code = code,
         };
         
         Serializer.Serialize(ms, packet);

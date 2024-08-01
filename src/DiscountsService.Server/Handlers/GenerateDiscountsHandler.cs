@@ -1,100 +1,167 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Text.RegularExpressions;
 using DiscountsService.Network.Packets;
+using DiscountsService.Persistence;
+using Microsoft.EntityFrameworkCore;
+using MySqlConnector;
 
 namespace DiscountsService.Server.Handlers;
 
-public class GenerateDiscountsHandler : IDiscountsPacketHandler<GenerateDiscountsRequestPacket>
+public partial class GenerateDiscountsHandler : IDiscountsPacketHandler<GenerateDiscountsRequestPacket>
 {
-    public Task ExecuteAsync(DiscountsPacketContext<GenerateDiscountsRequestPacket> ctx, CancellationToken token = default)
-    {
-
-        var numberOfDiscountCodesToGenerate = ctx.Packet.Count; // 0 to 2 million max 
-        var lengthOfDiscountCode = ctx.Packet.Length; // imagining this is 7 to 8
-        
-        var discountCodes = new List<string>();
-        
-        for (var i = 0; i < numberOfDiscountCodesToGenerate; i++)
-        {
-            var discountCode = Guid.NewGuid().ToString()[..lengthOfDiscountCode];
-            discountCodes.Add(discountCode);
-        }
-        
-        return Task.CompletedTask;
-    }
-}
-
-
-public class DiscountCodeGeneratorService
-{
-    // In the future will be a database system integration
-    private readonly ConcurrentDictionary<string, byte> _discountCodes = new();
-    
-    private static readonly Random Random = new Random();
     private const string Characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    private const int BatchSize = 1000; // Process in batches to control resource usage
+    private readonly DiscountsDbContext _db;
+    private readonly ILogger<GenerateDiscountsHandler> _logger;
+    private readonly Random _random = new();
     
-    public async Task<bool> GenerateAsync(ushort count, byte length)
+    private const ushort MinCodes = 1;
+    private const ushort MaxCodes = 2_000;
+    
+    private const byte MinLength = 7;
+    private const byte MaxLength = 8;
+    
+    // 1062 is the error code for a duplicate entry in MySQL provider
+    private const int DuplicateEntryErrorCode = 1062;
+    
+    public GenerateDiscountsHandler(ILoggerFactory loggerFactory, DiscountsDbContext db)
     {
-        var batches = Partition(count, BatchSize);
-
-        var tasks = batches.Select(batch => Task.Run(() => GenerateBatch(batch, length)));
-        await Task.WhenAll(tasks);
-
-        return true;
+        _logger = loggerFactory.CreateLogger<GenerateDiscountsHandler>();
+        _db = db;
     }
     
-    private void GenerateBatch(int count, byte length)
+    public async Task ExecuteAsync(DiscountsPacketContext<GenerateDiscountsRequestPacket> ctx, CancellationToken token = default)
     {
-        for (var i = 0; i < count; i++)
-        {
-            string discountCode;
-            do
-            {
-                discountCode = GenerateRandomCode(length);
-            } while (!StoreDiscountCode(discountCode));
-        }
-    }
-    
-    private bool StoreDiscountCode(string discountCode)
-    {
-        // In the future will be a database call
-        return _discountCodes.TryAdd(discountCode, 0);
-    }
-    
-    private bool GenerateDiscountCode(byte length, out string discountCode)
-    {
-        var provisionalDiscountCode = GenerateRandomCode(length);
+        var sw = Stopwatch.StartNew();
+        var numberOfcodes = ctx.Packet.Count;
+        var length = ctx.Packet.Length;
         
-        if (_discountCodes.ContainsKey(provisionalDiscountCode))
+        if (numberOfcodes is < MinCodes or > MaxCodes)
         {
-            discountCode = string.Empty;
-            return false;
+            ctx.Connection.Send(GenerateDiscountResponsePacket.Create(false));
+            return;
         }
         
-        _discountCodes.TryAdd(provisionalDiscountCode, 0);
-        discountCode = provisionalDiscountCode;
-        
-        return true;
-    }
-    
-    private static string GenerateRandomCode(int length)
-    {
-        var code = new char[length];
-        lock (Random)
+        if (length is < MinLength or > MaxLength)
         {
-            for (var i = 0; i < length; i++)
+            ctx.Connection.Send(GenerateDiscountResponsePacket.Create(false));
+            return;
+        }
+        
+        var generatedCodes = GenerateCodes(numberOfcodes, length, token);
+        
+        while (true)
+        {
+            if (generatedCodes.Count < numberOfcodes)
             {
-                code[i] = Characters[Random.Next(Characters.Length)];
+                _logger.LogDebug("Failed to generate enough unique codes, trying again");
+                var missingCodes = (ushort) (numberOfcodes - generatedCodes.Count);
+                generatedCodes.AddRange(GenerateCodes(missingCodes, length, token));
+            }
+        
+            var result = await SaveCodesAsync(generatedCodes, token);
+            
+            if (result.Success) break;
+            
+            if (result.DuplicateEntry is not null)
+            {
+                generatedCodes.Remove(result.DuplicateEntry);
+            }
+            else
+            {
+                generatedCodes.Clear();
             }
         }
+        
+        sw.Stop();
+        _logger.LogInformation("Generated and saved {Amount} codes in {Elapsed}ms", generatedCodes.Count, sw.ElapsedMilliseconds);
+        
+        ctx.Connection.Send(GenerateDiscountResponsePacket.Create(true));
+    }
+    
+    private List<DiscountCode> GenerateCodes(ushort amount, ushort length, CancellationToken token = default)
+    {
+        var sw = Stopwatch.StartNew();
+        var codes = new List<DiscountCode>();
+        
+        for (var i = 0; i < amount; i++)
+        {
+            var code = new DiscountCode
+            {
+                Code = GenerateRandomCode(length),
+                Used = false,
+                UsedAt = null,
+                CreatedAt = DateTime.UtcNow
+            };
+            
+            codes.Add(code);
+        }
+        
+        sw.Stop();
+        _logger.LogInformation("Generated {Amount} codes in {Elapsed}ms", codes.Count, sw.ElapsedMilliseconds);
+        
+        return codes;
+    }
+    
+    private async Task<(bool Success, DiscountCode? DuplicateEntry)> SaveCodesAsync(List<DiscountCode> codes, CancellationToken token = default)
+    {
+        var sw = Stopwatch.StartNew();
+        // We need to detect if there was a unique constraint violation,
+        // in case it was we should regenerate the codes and try again
+        try
+        {
+            await _db.DiscountCodes.AddRangeAsync(codes, token);
+            
+            await _db.SaveChangesAsync(token);
+        }
+        catch (DbUpdateException ex)
+        {
+            if (ex.InnerException is not MySqlException {Number: DuplicateEntryErrorCode}) return (false, null); // TODO: Const for the error code
+            
+            var duplicateCode = ExtractDuplicateEntry(ex.Message);
+            var duplicateEntry = ex.Entries
+                .Select(e => e.Entity as DiscountCode)
+                .FirstOrDefault(dc => dc?.Code == duplicateCode);
+
+            return (false, duplicateEntry);
+        }
+        
+        sw.Stop();
+        _logger.LogInformation("Saved {Amount} codes in {Elapsed}ms", codes.Count, sw.ElapsedMilliseconds);
+        
+        return (true, null);
+    }
+
+    
+    
+    private static string? ExtractDuplicateEntry(string errorMessage)
+    {
+        // Call the source-generated regex method to match the pattern
+        var match = DuplicateEntryRegex().Match(errorMessage);
+
+        // Check if the match was successful and contains two captured groups
+        if (match is {Success: true, Groups.Count: >= 2})
+        {
+            // Return the first captured group which contains the duplicate entry
+            return match.Groups[1].Value;
+        }
+
+        // Return null if no match is found
+        return null;
+    }
+    
+    private string GenerateRandomCode(ushort length)
+    {
+        var code = new char[length];
+        
+        for (var i = 0; i < length; i++)
+        {
+            code[i] = Characters[_random.Next(Characters.Length)];
+        }
+        
         return new string(code);
     }
     
-    private static IEnumerable<int> Partition(int total, int size)
-    {
-        for (var i = 0; i < total; i += size)
-        {
-            yield return Math.Min(size, total - i);
-        }
-    }
+    [GeneratedRegex("'([^']*)'")]
+    private static partial Regex DuplicateEntryRegex();
 }

@@ -10,6 +10,11 @@
 
     <ItemGroup>
       <ProjectReference Include="..\DiscountsService.Hosting\DiscountsService.Hosting.csproj" />
+      <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.7">
+          <PrivateAssets>all</PrivateAssets>
+          <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      </PackageReference>
+      <ProjectReference Include="..\DiscountsService.Persistence\DiscountsService.Persistence.csproj" />
     </ItemGroup>
 
 </Project>
