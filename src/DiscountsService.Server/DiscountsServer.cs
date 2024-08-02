@@ -33,7 +33,6 @@ public class DiscountsServer(
     {
         foreach (var connection in Connections)
         {
-            // TODO: Send a disconnect packet
             connection.Close();
         }
         return Task.CompletedTask;

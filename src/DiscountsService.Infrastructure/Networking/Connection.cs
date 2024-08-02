@@ -168,7 +168,7 @@ public abstract class Connection : BackgroundService, IConnection
     
     private void OnPacketQueueFull(NetworkPacket packet)
     {
-        // TODO: Here multiple things could be done differently, such as wait for the queue to have space to enqueue again, drop the packet, etc
+        // NOTE: Here multiple things could be done differently, such as wait for the queue to have space to enqueue again, drop the packet, etc
         // for now, we just drop the packet since this is a PoC
         Logger.LogWarning("Packet queue is full. Dropping packet {Packet}", packet.Header.Type);
     }

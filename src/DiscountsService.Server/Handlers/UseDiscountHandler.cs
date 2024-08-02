@@ -48,6 +48,6 @@ public class UseDiscountHandler : IDiscountsPacketHandler<UseDiscountRequestPack
         
         ctx.Connection.Send(UseDiscountResponsePacket.Create(true));
         
-        _logger.LogInformation("Discount code {Code} used by {RemoteEndPoint} in {ElapsedMilliseconds}ms", code, ctx.Connection.RemoteEndPoint, sw.ElapsedMilliseconds);
+        _logger.LogDebug("Discount code {Code} used by {RemoteEndPoint} in {ElapsedMilliseconds}ms", code, ctx.Connection.RemoteEndPoint, sw.ElapsedMilliseconds);
     }
 }

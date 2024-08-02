@@ -74,7 +74,7 @@ public partial class GenerateDiscountsHandler : IDiscountsPacketHandler<Generate
         }
         
         sw.Stop();
-        _logger.LogInformation("Generated and saved {Amount} codes in {Elapsed}ms", generatedCodes.Count, sw.ElapsedMilliseconds);
+        _logger.LogDebug("Generated and saved {Amount} codes in {Elapsed}ms", generatedCodes.Count, sw.ElapsedMilliseconds);
         
         ctx.Connection.Send(GenerateDiscountResponsePacket.Create(true));
     }
@@ -98,7 +98,7 @@ public partial class GenerateDiscountsHandler : IDiscountsPacketHandler<Generate
         }
         
         sw.Stop();
-        _logger.LogInformation("Generated {Amount} codes in {Elapsed}ms", codes.Count, sw.ElapsedMilliseconds);
+        _logger.LogDebug("Generated {Amount} codes in {Elapsed}ms", codes.Count, sw.ElapsedMilliseconds);
         
         return codes;
     }
@@ -127,7 +127,7 @@ public partial class GenerateDiscountsHandler : IDiscountsPacketHandler<Generate
         }
         
         sw.Stop();
-        _logger.LogInformation("Saved {Amount} codes in {Elapsed}ms", codes.Count, sw.ElapsedMilliseconds);
+        _logger.LogDebug("Saved {Amount} codes in {Elapsed}ms", codes.Count, sw.ElapsedMilliseconds);
         
         return (true, null);
     }
