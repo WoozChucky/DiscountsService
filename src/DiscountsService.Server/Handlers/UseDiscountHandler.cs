@@ -26,6 +26,8 @@ public class UseDiscountHandler : IDiscountsPacketHandler<UseDiscountRequestPack
             ctx.Connection.Send(UseDiscountResponsePacket.Create(false));
             return;
         }
+
+        code = code.Trim().ToUpper();
         
         var discount = await _db.DiscountCodes.FirstOrDefaultAsync(d => d.Code == code, token);
         
